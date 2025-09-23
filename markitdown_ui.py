@@ -4,7 +4,8 @@ from pathlib import Path
 import threading
 import warnings
 import re
-from tkinterdnd2 import DND_FILES, TkinterDnD
+
+# 不使用拖拽功能
 
 # 忽略ffmpeg警告
 warnings.filterwarnings("ignore", message="Couldn't find ffmpeg or avconv")
@@ -37,17 +38,13 @@ class MarkItDownUI:
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # 文件选择区域
-        file_frame = ttk.LabelFrame(main_frame, text="文件选择 (支持拖拽)", padding="5")
+        file_frame = ttk.LabelFrame(main_frame, text="文件选择", padding="5")
         file_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
         self.file_path = tk.StringVar()
         self.file_entry = ttk.Entry(file_frame, textvariable=self.file_path, width=60)
         self.file_entry.grid(row=0, column=0, padx=(0, 5))
         ttk.Button(file_frame, text="浏览", command=self.browse_file).grid(row=0, column=1)
-        
-        # 启用拖拽功能
-        self.file_entry.drop_target_register(DND_FILES)
-        self.file_entry.dnd_bind('<<Drop>>', self.on_file_drop)
         
         # URL输入区域
         url_frame = ttk.LabelFrame(main_frame, text="或输入URL", padding="5")
@@ -203,17 +200,9 @@ class MarkItDownUI:
         if hasattr(self, 'current_result'):
             delattr(self, 'current_result')
 
-    def on_file_drop(self, event):
-        """处理文件拖拽"""
-        files = self.root.tk.splitlist(event.data)
-        if files:
-            file_path = files[0]  # 取第一个文件
-            self.file_path.set(file_path)
-            self.url_path.set("")  # 清空URL
-            self.status_var.set(f"已选择文件: {Path(file_path).name}")
 
 def main():
-    root = TkinterDnD.Tk()  # 使用TkinterDnD的Tk
+    root = tk.Tk()  # 使用普通的Tk
     app = MarkItDownUI(root)
     root.mainloop()
 
