@@ -4,6 +4,11 @@ from pathlib import Path
 import threading
 import warnings
 import re
+try:
+    import openpyxl
+    EXCEL_SUPPORT = True
+except ImportError:
+    EXCEL_SUPPORT = False
 
 # 不使用拖拽功能
 
@@ -22,7 +27,12 @@ class MarkItDownUI:
     def __init__(self, root):
         self.root = root
         self.root.title("MarkItDown 文件转换器")
-        self.root.geometry("800x600")
+        self.root.geometry("900x700")
+        
+        # 初始化变量
+        self.excel_sheets = []
+        self.selected_sheets = []
+        self.current_excel_file = None
         
         # 初始化MarkItDown
         try:
@@ -53,9 +63,34 @@ class MarkItDownUI:
         self.url_path = tk.StringVar()
         ttk.Entry(url_frame, textvariable=self.url_path, width=70).grid(row=0, column=0)
         
+        # Excel Sheet 选择区域（初始隐藏）
+        self.excel_frame = ttk.LabelFrame(main_frame, text="Excel Sheet 选择", padding="5")
+        self.excel_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        self.excel_frame.grid_remove()  # 初始隐藏
+        
+        # Sheet 选择控件
+        sheet_control_frame = ttk.Frame(self.excel_frame)
+        sheet_control_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+        
+        ttk.Button(sheet_control_frame, text="全选", command=self.select_all_sheets).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(sheet_control_frame, text="全不选", command=self.deselect_all_sheets).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(sheet_control_frame, text="反选", command=self.invert_sheet_selection).pack(side=tk.LEFT)
+        
+        # Sheet 列表框架
+        sheet_list_frame = ttk.Frame(self.excel_frame)
+        sheet_list_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Sheet 列表（带滚动条）
+        self.sheet_listbox = tk.Listbox(sheet_list_frame, selectmode=tk.MULTIPLE, height=6)
+        sheet_scrollbar = ttk.Scrollbar(sheet_list_frame, orient=tk.VERTICAL, command=self.sheet_listbox.yview)
+        self.sheet_listbox.configure(yscrollcommand=sheet_scrollbar.set)
+        
+        self.sheet_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sheet_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
         # 转换按钮
         button_frame = ttk.Frame(main_frame)
-        button_frame.grid(row=2, column=0, columnspan=2, pady=(0, 10))
+        button_frame.grid(row=3, column=0, columnspan=2, pady=(0, 10))
         
         ttk.Button(button_frame, text="转换为Markdown", command=self.convert_file).pack(side=tk.LEFT, padx=(0, 5))
         ttk.Button(button_frame, text="保存结果", command=self.save_result).pack(side=tk.LEFT, padx=(0, 5))
@@ -63,12 +98,12 @@ class MarkItDownUI:
         
         # 进度条（初始状态隐藏）
         self.progress = ttk.Progressbar(main_frame, mode='indeterminate')
-        self.progress.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        self.progress.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         self.progress.grid_remove()  # 初始隐藏
         
         # 结果显示区域
         result_frame = ttk.LabelFrame(main_frame, text="转换结果", padding="5")
-        result_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
+        result_frame.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         self.result_text = scrolledtext.ScrolledText(result_frame, wrap=tk.WORD, height=20)
         self.result_text.pack(fill=tk.BOTH, expand=True)
@@ -76,13 +111,13 @@ class MarkItDownUI:
         # 状态栏
         self.status_var = tk.StringVar(value="就绪 - 请选择文件或输入URL")
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, relief=tk.SUNKEN)
-        status_bar.grid(row=5, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+        status_bar.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
         
         # 配置网格权重
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(4, weight=1)
+        main_frame.rowconfigure(5, weight=1)
         
     def browse_file(self):
         filename = filedialog.askopenfilename(
@@ -100,6 +135,7 @@ class MarkItDownUI:
         if filename:
             self.file_path.set(filename)
             self.url_path.set("")  # 清空URL
+            self._check_excel_file(filename)
             
     def convert_file(self):
         file_path = self.file_path.get().strip()
@@ -116,8 +152,27 @@ class MarkItDownUI:
         try:
             self.root.after(0, self._start_conversion)
             
-            # 执行转换
-            result = self.md.convert(source)
+            # 检查是否为 Excel 文件且需要特殊处理
+            if (self.current_excel_file and 
+                self.current_excel_file == source and 
+                EXCEL_SUPPORT):
+                
+                selected_sheets = self._get_selected_sheets()
+                if selected_sheets:
+                    # 使用自定义的 Excel 转换
+                    markdown_content = self._convert_excel_sheets(source, selected_sheets)
+                    
+                    # 创建一个模拟的结果对象
+                    class MockResult:
+                        def __init__(self, markdown):
+                            self.markdown = markdown
+                    
+                    result = MockResult(markdown_content)
+                else:
+                    raise Exception("请至少选择一个 Sheet")
+            else:
+                # 使用 MarkItDown 的默认转换
+                result = self.md.convert(source)
             
             # 更新UI
             self.root.after(0, self._conversion_complete, result, source)
@@ -199,6 +254,135 @@ class MarkItDownUI:
         self.status_var.set("就绪")
         if hasattr(self, 'current_result'):
             delattr(self, 'current_result')
+        
+        # 隐藏 Excel 选择区域
+        self.excel_frame.grid_remove()
+        self.current_excel_file = None
+        self.excel_sheets = []
+        self.selected_sheets = []
+
+    def _check_excel_file(self, filename):
+        """检查是否为 Excel 文件，如果是则显示 sheet 选择"""
+        if not EXCEL_SUPPORT:
+            return
+            
+        file_ext = Path(filename).suffix.lower()
+        if file_ext in ['.xlsx', '.xls']:
+            try:
+                self.current_excel_file = filename
+                self._load_excel_sheets(filename)
+                self.excel_frame.grid()  # 显示 Excel 选择区域
+            except Exception as e:
+                messagebox.showerror("Excel 文件错误", f"无法读取 Excel 文件: {str(e)}")
+        else:
+            self.excel_frame.grid_remove()  # 隐藏 Excel 选择区域
+            self.current_excel_file = None
+
+    def _load_excel_sheets(self, filename):
+        """加载 Excel 文件的所有 sheet"""
+        try:
+            workbook = openpyxl.load_workbook(filename, read_only=True)
+            self.excel_sheets = workbook.sheetnames
+            workbook.close()
+            
+            # 更新 listbox
+            self.sheet_listbox.delete(0, tk.END)
+            for sheet in self.excel_sheets:
+                self.sheet_listbox.insert(tk.END, sheet)
+            
+            # 默认选择所有 sheet
+            self.select_all_sheets()
+            
+        except Exception as e:
+            raise Exception(f"读取 Excel 文件失败: {str(e)}")
+
+    def select_all_sheets(self):
+        """选择所有 sheet"""
+        self.sheet_listbox.selection_set(0, tk.END)
+
+    def deselect_all_sheets(self):
+        """取消选择所有 sheet"""
+        self.sheet_listbox.selection_clear(0, tk.END)
+
+    def invert_sheet_selection(self):
+        """反选 sheet"""
+        selected = set(self.sheet_listbox.curselection())
+        all_indices = set(range(self.sheet_listbox.size()))
+        
+        self.sheet_listbox.selection_clear(0, tk.END)
+        for i in all_indices - selected:
+            self.sheet_listbox.selection_set(i)
+
+    def _get_selected_sheets(self):
+        """获取选中的 sheet 名称列表"""
+        selected_indices = self.sheet_listbox.curselection()
+        return [self.excel_sheets[i] for i in selected_indices]
+
+    def _convert_excel_sheets(self, filename, selected_sheets):
+        """转换选中的 Excel sheets"""
+        if not selected_sheets:
+            raise Exception("请至少选择一个 Sheet")
+        
+        results = []
+        for sheet_name in selected_sheets:
+            try:
+                # 使用 MarkItDown 转换单个 sheet
+                # 注意：MarkItDown 可能不直接支持指定 sheet，我们需要手动处理
+                workbook = openpyxl.load_workbook(filename, read_only=True)
+                worksheet = workbook[sheet_name]
+                
+                # 将 sheet 数据转换为 markdown 表格
+                markdown_content = self._worksheet_to_markdown(worksheet, sheet_name)
+                results.append(markdown_content)
+                
+                workbook.close()
+                
+            except Exception as e:
+                results.append(f"# {sheet_name}\n\n**错误**: 无法转换此 Sheet - {str(e)}\n\n")
+        
+        return "\n\n---\n\n".join(results)
+
+    def _worksheet_to_markdown(self, worksheet, sheet_name):
+        """将 Excel worksheet 转换为 Markdown"""
+        markdown = f"# {sheet_name}\n\n"
+        
+        # 获取有数据的区域
+        if worksheet.max_row == 1 and worksheet.max_column == 1:
+            return markdown + "此 Sheet 为空\n"
+        
+        # 转换为表格
+        rows = []
+        for row in worksheet.iter_rows(values_only=True):
+            # 跳过完全空的行
+            if all(cell is None or str(cell).strip() == '' for cell in row):
+                continue
+            # 将 None 值转换为空字符串，其他值转换为字符串
+            row_data = [str(cell) if cell is not None else '' for cell in row]
+            rows.append(row_data)
+        
+        if not rows:
+            return markdown + "此 Sheet 为空\n"
+        
+        # 确定最大列数
+        max_cols = max(len(row) for row in rows) if rows else 0
+        
+        # 补齐所有行到相同列数
+        for row in rows:
+            while len(row) < max_cols:
+                row.append('')
+        
+        # 生成 Markdown 表格
+        if rows:
+            # 表头
+            header = "| " + " | ".join(rows[0]) + " |"
+            separator = "| " + " | ".join(['---'] * len(rows[0])) + " |"
+            markdown += header + "\n" + separator + "\n"
+            
+            # 数据行
+            for row in rows[1:]:
+                markdown += "| " + " | ".join(row) + " |\n"
+        
+        return markdown
 
 
 def main():
