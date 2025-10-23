@@ -1,36 +1,12 @@
- # MarkItDown 文件转换器依赖包
-
-# 核心转换引擎 - 包含所有可选依赖
-markitdown[all]>=0.0.1a2
-
-# GUI 文件拖拽支持
-tkinterdnd2>=0.3.0
-
-# 以下是 markitdown[all] 包含的依赖，通常会自动安装
-# 如果遇到安装问题，可以单独安装以下包：
-
-# PDF 处理
-# pypdf>=4.0.0
-# pymupdf>=1.23.0
-
-# 图像 OCR 处理
-# pillow>=10.0.0
-# pytesseract>=0.3.10
-
-# Office 文档处理
-# python-docx>=1.1.0
-# openpyxl>=3.1.0
-# python-pptx>=0.6.23
-
-# 音频处理（可选）
-# openai-whisper>=20231117
-
-# 网页处理
-# beautifulsoup4>=4.12.0
-# requests>=2.31.0
-
-# CSV 处理
-# pandas>=2.0.0
-
-# EPUB 处理
-# ebooklib>=0.18
+PySide6>=6.5.0
+PyInstaller>=5.13.0
+markitdown[all]>=0.0.1a4
+openpyxl>=3.1.0
+Pillow>=9.0.0
+PyPDF2>=3.0.0
+pdfplumber>=0.9.0
+python-docx>=0.8.11
+python-pptx>=0.6.21
+beautifulsoup4>=4.11.0
+requests>=2.28.0
+lxml>=4.9.0
