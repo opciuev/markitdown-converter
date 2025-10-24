@@ -1,6 +1,5 @@
 import sys
 from pathlib import Path
-import threading
 import warnings
 import re
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
@@ -8,7 +7,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                               QTextEdit, QFileDialog, QMessageBox, QProgressBar,
                               QListWidget, QListWidgetItem, QFrame,
                               QAbstractItemView)
-from PySide6.QtCore import Qt, QThread, Signal, QTimer, QMimeData
+from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtGui import QFont, QDragEnterEvent, QDropEvent
 
 try:
@@ -189,8 +188,8 @@ class MarkItDownUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MarkItDown 文件转换器")
-        self.setGeometry(100, 100, 1100, 800)
-        self.setMinimumSize(900, 600)
+        self.setGeometry(100, 100, 1000, 850)
+        self.setMinimumSize(850, 700)
 
         # 初始化变量
         self.excel_sheets = []
@@ -249,14 +248,15 @@ class MarkItDownUI(QMainWindow):
 
             /* ===== 输入框 ===== */
             QLineEdit {
-                padding: 12px 16px;
+                padding: 0px 12px;
                 border: 2px solid #dee2e6;
-                border-radius: 8px;
+                border-radius: 6px;
                 background-color: #ffffff;
-                font-size: 13px;
+                font-size: 12px;
                 color: #212529;
                 selection-background-color: #0d6efd;
                 selection-color: white;
+                min-height: 20px;
             }
 
             QLineEdit:hover {
@@ -279,12 +279,12 @@ class MarkItDownUI(QMainWindow):
                 background-color: #0d6efd;
                 color: white;
                 border: none;
-                border-radius: 8px;
-                padding: 12px 24px;
-                font-size: 14px;
+                border-radius: 6px;
+                padding: 8px 16px;
+                font-size: 13px;
                 font-weight: 600;
-                min-width: 100px;
-                min-height: 44px;
+                min-width: 80px;
+                min-height: 36px;
             }
 
             QPushButton:hover {
@@ -293,7 +293,7 @@ class MarkItDownUI(QMainWindow):
 
             QPushButton:pressed {
                 background-color: #0a58ca;
-                padding: 13px 23px 11px 25px;
+                padding: 9px 15px 7px 17px;
             }
 
             QPushButton:disabled {
@@ -348,7 +348,12 @@ class MarkItDownUI(QMainWindow):
                 background-color: transparent;
                 color: #0d6efd;
                 border: 2px solid #0d6efd;
-                min-width: 90px;
+                border-radius: 6px;
+                padding: 0px 16px;
+                font-size: 12px;
+                font-weight: 600;
+                min-width: 70px;
+                min-height: 20px;
             }
 
             QPushButton#browseButton:hover {
@@ -361,16 +366,38 @@ class MarkItDownUI(QMainWindow):
                 border-color: #0b5ed7;
             }
 
+            /* 紧凑按钮 - 用于 Excel 操作等 */
+            QPushButton#compactButton {
+                background-color: #e9ecef;
+                color: #495057;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 12px;
+                font-size: 12px;
+                font-weight: 500;
+                min-width: 50px;
+                min-height: 28px;
+            }
+
+            QPushButton#compactButton:hover {
+                background-color: #dee2e6;
+                color: #212529;
+            }
+
+            QPushButton#compactButton:pressed {
+                background-color: #ced4da;
+                padding: 5px 11px 3px 13px;
+            }
+
             /* ===== 文本编辑器 ===== */
             QTextEdit {
                 border: 2px solid #dee2e6;
                 border-radius: 8px;
                 background-color: #ffffff;
-                padding: 16px;
+                padding: 10px;
                 font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-                font-size: 12px;
+                font-size: 11px;
                 color: #212529;
-                line-height: 1.6;
                 selection-background-color: #0d6efd;
                 selection-color: white;
             }
@@ -379,13 +406,18 @@ class MarkItDownUI(QMainWindow):
                 border: 2px solid #0d6efd;
             }
 
+            /* 确保 placeholder 文本完整显示 */
+            QTextEdit QAbstractScrollArea {
+                padding: 0px;
+            }
+
             /* ===== 列表控件 ===== */
             QListWidget {
                 border: 2px solid #dee2e6;
-                border-radius: 8px;
+                border-radius: 6px;
                 background-color: white;
-                padding: 8px;
-                font-size: 13px;
+                padding: 6px;
+                font-size: 12px;
                 color: #212529;
                 outline: none;
             }
@@ -395,9 +427,9 @@ class MarkItDownUI(QMainWindow):
             }
 
             QListWidget::item {
-                padding: 10px 12px;
-                border-radius: 6px;
-                margin: 2px 0;
+                padding: 6px 10px;
+                border-radius: 4px;
+                margin: 1px 0;
                 border: none;
             }
 
@@ -442,10 +474,10 @@ class MarkItDownUI(QMainWindow):
             }
 
             QLabel#sectionTitle {
-                font-size: 15px;
+                font-size: 13px;
                 font-weight: 600;
                 color: #212529;
-                padding: 8px 0;
+                padding: 4px 0;
             }
 
             /* ===== 滚动条 ===== */
@@ -496,68 +528,48 @@ class MarkItDownUI(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # 主布局 - 使用更大的边距
+        # 主布局
         main_layout = QVBoxLayout(central_widget)
-        main_layout.setSpacing(16)
-        main_layout.setContentsMargins(24, 24, 24, 24)
+        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(16, 16, 16, 16)
 
         # ===== 顶部：输入区域 =====
         input_container = QWidget()
         input_container.setObjectName("cardContainer")
         input_layout = QVBoxLayout(input_container)
-        input_layout.setSpacing(16)
-        input_layout.setContentsMargins(20, 20, 20, 20)
+        input_layout.setSpacing(12)
+        input_layout.setContentsMargins(16, 16, 16, 16)
 
-        # 文件选择区域
-        file_section = QWidget()
-        file_section_layout = QVBoxLayout(file_section)
-        file_section_layout.setSpacing(8)
-        file_section_layout.setContentsMargins(0, 0, 0, 0)
+        # 统一的输入区域（文件路径或URL）
+        input_section = QWidget()
+        input_section_layout = QVBoxLayout(input_section)
+        input_section_layout.setSpacing(6)
+        input_section_layout.setContentsMargins(0, 0, 0, 0)
 
-        file_label = QLabel("文件选择")
-        file_label.setObjectName("sectionTitle")
-        file_section_layout.addWidget(file_label)
+        input_label = QLabel("文件或URL")
+        input_label.setObjectName("sectionTitle")
+        input_section_layout.addWidget(input_label)
 
-        file_input_layout = QHBoxLayout()
-        file_input_layout.setSpacing(12)
+        input_control_layout = QHBoxLayout()
+        input_control_layout.setSpacing(10)
 
         self.file_entry = DragDropLineEdit()
-        self.file_entry.setPlaceholderText("选择文件或拖拽文件到此处...")
-        self.file_entry.setMinimumHeight(48)
-        file_input_layout.addWidget(self.file_entry, stretch=1)
+        self.file_entry.setPlaceholderText("选择文件、拖拽文件到此处，或输入URL...")
+        # 总高度 = min-height(20) + padding(0*2) + border(2*2) = 24px
+        # 但为了垂直居中文字，使用稍大的高度
+        self.file_entry.setFixedHeight(36)
+        input_control_layout.addWidget(self.file_entry, stretch=1)
 
         browse_btn = QPushButton("浏览")
         browse_btn.setObjectName("browseButton")
-        browse_btn.setMinimumWidth(100)
-        browse_btn.setMinimumHeight(48)
+        browse_btn.setMinimumWidth(80)
+        # 设置和输入框完全相同的高度
+        browse_btn.setFixedHeight(36)
         browse_btn.clicked.connect(self.browse_file)
-        file_input_layout.addWidget(browse_btn)
+        input_control_layout.addWidget(browse_btn)
 
-        file_section_layout.addLayout(file_input_layout)
-        input_layout.addWidget(file_section)
-
-        # 分隔线
-        separator1 = QFrame()
-        separator1.setFrameShape(QFrame.HLine)
-        separator1.setStyleSheet("background-color: #e9ecef; max-height: 1px;")
-        input_layout.addWidget(separator1)
-
-        # URL输入区域
-        url_section = QWidget()
-        url_section_layout = QVBoxLayout(url_section)
-        url_section_layout.setSpacing(8)
-        url_section_layout.setContentsMargins(0, 0, 0, 0)
-
-        url_label = QLabel("或输入URL")
-        url_label.setObjectName("sectionTitle")
-        url_section_layout.addWidget(url_label)
-
-        self.url_entry = QLineEdit()
-        self.url_entry.setPlaceholderText("输入要转换的URL...")
-        self.url_entry.setMinimumHeight(48)
-        url_section_layout.addWidget(self.url_entry)
-
-        input_layout.addWidget(url_section)
+        input_section_layout.addLayout(input_control_layout)
+        input_layout.addWidget(input_section)
 
         main_layout.addWidget(input_container)
 
@@ -565,73 +577,78 @@ class MarkItDownUI(QMainWindow):
         self.excel_container = QWidget()
         self.excel_container.setObjectName("cardContainer")
         excel_main_layout = QVBoxLayout(self.excel_container)
-        excel_main_layout.setSpacing(12)
-        excel_main_layout.setContentsMargins(20, 20, 20, 20)
+        excel_main_layout.setSpacing(8)
+        excel_main_layout.setContentsMargins(16, 12, 16, 12)
+
+        # 标题和按钮在同一行
+        excel_header_layout = QHBoxLayout()
+        excel_header_layout.setSpacing(10)
 
         excel_title = QLabel("Excel Sheet 选择")
         excel_title.setObjectName("sectionTitle")
-        excel_main_layout.addWidget(excel_title)
+        excel_header_layout.addWidget(excel_title)
 
-        # Sheet 选择控件
-        sheet_control_layout = QHBoxLayout()
-        sheet_control_layout.setSpacing(10)
+        excel_header_layout.addStretch()
 
+        # 使用更小的按钮
         select_all_btn = QPushButton("全选")
-        select_all_btn.setObjectName("successButton")
-        select_all_btn.setMinimumWidth(90)
+        select_all_btn.setObjectName("compactButton")
         select_all_btn.clicked.connect(self.select_all_sheets)
-        sheet_control_layout.addWidget(select_all_btn)
+        excel_header_layout.addWidget(select_all_btn)
 
         deselect_all_btn = QPushButton("全不选")
-        deselect_all_btn.setObjectName("secondaryButton")
-        deselect_all_btn.setMinimumWidth(90)
+        deselect_all_btn.setObjectName("compactButton")
         deselect_all_btn.clicked.connect(self.deselect_all_sheets)
-        sheet_control_layout.addWidget(deselect_all_btn)
+        excel_header_layout.addWidget(deselect_all_btn)
 
         invert_btn = QPushButton("反选")
-        invert_btn.setObjectName("secondaryButton")
-        invert_btn.setMinimumWidth(90)
+        invert_btn.setObjectName("compactButton")
         invert_btn.clicked.connect(self.invert_sheet_selection)
-        sheet_control_layout.addWidget(invert_btn)
+        excel_header_layout.addWidget(invert_btn)
 
-        sheet_control_layout.addStretch()
-        excel_main_layout.addLayout(sheet_control_layout)
+        excel_main_layout.addLayout(excel_header_layout)
 
         # Sheet 列表
         self.sheet_listbox = QListWidget()
         self.sheet_listbox.setSelectionMode(QAbstractItemView.MultiSelection)
-        self.sheet_listbox.setMaximumHeight(160)
+        self.sheet_listbox.setMinimumHeight(100)
+        self.sheet_listbox.setMaximumHeight(150)
         excel_main_layout.addWidget(self.sheet_listbox)
 
         main_layout.addWidget(self.excel_container)
         self.excel_container.hide()  # 初始隐藏
-        
+
         # ===== 操作按钮区域 =====
         button_container = QWidget()
         button_main_layout = QVBoxLayout(button_container)
-        button_main_layout.setSpacing(12)
+        button_main_layout.setSpacing(8)
         button_main_layout.setContentsMargins(0, 0, 0, 0)
 
         button_layout = QHBoxLayout()
-        button_layout.setSpacing(12)
+        button_layout.setSpacing(8)
 
+        # 主转换按钮 - 更突出
         convert_btn = QPushButton("转换为Markdown")
-        convert_btn.setMinimumHeight(50)
-        convert_btn.setMinimumWidth(160)
+        convert_btn.setMinimumHeight(42)
+        convert_btn.setMinimumWidth(140)
         convert_btn.clicked.connect(self.convert_file)
-        button_layout.addWidget(convert_btn, stretch=1)
+        button_layout.addWidget(convert_btn)
 
+        # 添加弹性空间
+        button_layout.addStretch()
+
+        # 次要按钮 - 更小更紧凑
         save_btn = QPushButton("保存结果")
         save_btn.setObjectName("successButton")
-        save_btn.setMinimumHeight(50)
-        save_btn.setMinimumWidth(120)
+        save_btn.setMinimumHeight(38)
+        save_btn.setMinimumWidth(90)
         save_btn.clicked.connect(self.save_result)
         button_layout.addWidget(save_btn)
 
         clear_btn = QPushButton("清空")
-        clear_btn.setObjectName("dangerButton")
-        clear_btn.setMinimumHeight(50)
-        clear_btn.setMinimumWidth(100)
+        clear_btn.setObjectName("secondaryButton")
+        clear_btn.setMinimumHeight(38)
+        clear_btn.setMinimumWidth(70)
         clear_btn.clicked.connect(self.clear_result)
         button_layout.addWidget(clear_btn)
 
@@ -640,7 +657,7 @@ class MarkItDownUI(QMainWindow):
         # 进度条（初始状态隐藏）
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)  # 无限进度条
-        self.progress.setMinimumHeight(10)
+        self.progress.setMinimumHeight(6)
         button_main_layout.addWidget(self.progress)
         self.progress.hide()  # 初始隐藏
 
@@ -650,8 +667,8 @@ class MarkItDownUI(QMainWindow):
         result_container = QWidget()
         result_container.setObjectName("cardContainer")
         result_main_layout = QVBoxLayout(result_container)
-        result_main_layout.setSpacing(12)
-        result_main_layout.setContentsMargins(20, 20, 20, 20)
+        result_main_layout.setSpacing(10)
+        result_main_layout.setContentsMargins(16, 16, 16, 16)
 
         result_title = QLabel("转换结果")
         result_title.setObjectName("sectionTitle")
@@ -659,8 +676,10 @@ class MarkItDownUI(QMainWindow):
 
         self.result_text = DragDropTextEdit()
         self.result_text.setPlaceholderText("转换结果将显示在这里...\n\n您也可以直接拖拽文件到此处进行转换。")
-        self.result_text.setFont(QFont("Consolas", 11))
-        self.result_text.setMinimumHeight(250)
+        self.result_text.setFont(QFont("Consolas", 10))
+        self.result_text.setMinimumHeight(180)
+        # 设置文档边距，避免文字被裁剪
+        self.result_text.document().setDocumentMargin(5)
         result_main_layout.addWidget(self.result_text)
 
         main_layout.addWidget(result_container, stretch=1)
@@ -679,25 +698,21 @@ class MarkItDownUI(QMainWindow):
         )
         if filename:
             self.file_entry.setText(filename)
-            self.url_entry.clear()  # 清空URL
             self._check_excel_file(filename)
     
     def handle_file_drop(self, file_path):
         """处理文件拖拽"""
         self.file_entry.setText(file_path)
-        self.url_entry.clear()
         self._check_excel_file(file_path)
             
     def convert_file(self):
-        file_path = self.file_entry.text().strip()
-        url_path = self.url_entry.text().strip()
-        
-        if not file_path and not url_path:
+        source = self.file_entry.text().strip()
+
+        if not source:
             QMessageBox.warning(self, "错误", "请选择文件或输入URL")
             return
-            
+
         # 在后台线程中执行转换
-        source = file_path or url_path
         selected_sheets = self._get_selected_sheets() if self.current_excel_file else None
         
         self.worker = ConversionWorker(self.md, source, self.current_excel_file, selected_sheets)
@@ -775,7 +790,6 @@ class MarkItDownUI(QMainWindow):
     def clear_result(self):
         self.result_text.clear()
         self.file_entry.clear()
-        self.url_entry.clear()
         self.status_label.setText("就绪 - 请选择文件或输入URL")
         self.current_result = ""
 
