@@ -6,9 +6,11 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                               QHBoxLayout, QLabel, QLineEdit, QPushButton,
                               QTextEdit, QFileDialog, QMessageBox, QProgressBar,
                               QListWidget, QListWidgetItem, QFrame,
-                              QAbstractItemView)
+                              QAbstractItemView, QCheckBox)
 from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtGui import QFont, QDragEnterEvent, QDropEvent
+
+VERSION = "1.1.0.0"
 
 try:
     import openpyxl
@@ -187,7 +189,7 @@ class DragDropLineEdit(QLineEdit):
 class MarkItDownUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("MarkItDown 文件转换器")
+        self.setWindowTitle(f"MarkItDown 文件转换器 v{VERSION}")
         self.setGeometry(100, 100, 1000, 850)
         self.setMinimumSize(850, 700)
 
@@ -197,6 +199,10 @@ class MarkItDownUI(QMainWindow):
         self.current_excel_file = None
         self.current_result = ""
         self.current_title = ""
+        self.use_default_output = False
+        self.pending_save = False
+        # 记录最近一次保存/默认输出目录，初始为桌面（若不存在则用户主目录）
+        self.last_output_dir = self._get_default_output_dir()
 
         # 设置现代化样式
         self.setup_style()
@@ -573,6 +579,34 @@ class MarkItDownUI(QMainWindow):
 
         main_layout.addWidget(input_container)
 
+        # ===== 默认输出路径区域（放在输入与转换之间） =====
+        output_section = QWidget()
+        output_section_layout = QHBoxLayout(output_section)
+        output_section_layout.setSpacing(8)
+        output_section_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.default_output_checkbox = QCheckBox("使用默认输出路径（可编辑，默认桌面）")
+        self.default_output_checkbox.stateChanged.connect(self.toggle_default_output)
+        output_section_layout.addWidget(self.default_output_checkbox)
+
+        self.output_dir_edit = QLineEdit(str(self.last_output_dir))
+        self.output_dir_edit.setPlaceholderText("选择或输入输出目录")
+        self.output_dir_edit.setMinimumWidth(260)
+        output_section_layout.addWidget(self.output_dir_edit, stretch=1)
+
+        output_browse_btn = QPushButton("选择路径")
+        output_browse_btn.setObjectName("browseButton")
+        output_browse_btn.setFixedHeight(30)
+        output_browse_btn.clicked.connect(self.select_output_dir)
+        output_section_layout.addWidget(output_browse_btn)
+
+        # 初始未勾选时隐藏路径输入和按钮
+        self.output_dir_edit.hide()
+        output_browse_btn.hide()
+        self.output_dir_browse_btn = output_browse_btn  # 保存引用用于显隐控制
+
+        main_layout.addWidget(output_section)
+
         # ===== Excel Sheet 选择区域（初始隐藏）=====
         self.excel_container = QWidget()
         self.excel_container.setObjectName("cardContainer")
@@ -634,6 +668,14 @@ class MarkItDownUI(QMainWindow):
         convert_btn.clicked.connect(self.convert_file)
         button_layout.addWidget(convert_btn)
 
+        self.copy_btn = QPushButton("复制结果")
+        self.copy_btn.setObjectName("secondaryButton")
+        self.copy_btn.setMinimumHeight(38)
+        self.copy_btn.setMinimumWidth(90)
+        self.copy_btn.setEnabled(False)
+        self.copy_btn.clicked.connect(self.copy_result)
+        button_layout.addWidget(self.copy_btn)
+
         # 添加弹性空间
         button_layout.addStretch()
 
@@ -645,12 +687,19 @@ class MarkItDownUI(QMainWindow):
         save_btn.clicked.connect(self.save_result)
         button_layout.addWidget(save_btn)
 
-        clear_btn = QPushButton("清空")
-        clear_btn.setObjectName("secondaryButton")
-        clear_btn.setMinimumHeight(38)
-        clear_btn.setMinimumWidth(70)
-        clear_btn.clicked.connect(self.clear_result)
-        button_layout.addWidget(clear_btn)
+        self.refresh_btn = QPushButton("刷新")
+        self.refresh_btn.setObjectName("secondaryButton")
+        self.refresh_btn.setMinimumHeight(38)
+        self.refresh_btn.setMinimumWidth(70)
+        self.refresh_btn.clicked.connect(self.refresh_file)
+        button_layout.addWidget(self.refresh_btn)
+
+        self.clear_btn = QPushButton("清空")
+        self.clear_btn.setObjectName("secondaryButton")
+        self.clear_btn.setMinimumHeight(38)
+        self.clear_btn.setMinimumWidth(70)
+        self.clear_btn.clicked.connect(self.clear_result)
+        button_layout.addWidget(self.clear_btn)
 
         button_main_layout.addLayout(button_layout)
 
@@ -726,6 +775,11 @@ class MarkItDownUI(QMainWindow):
         self.progress.show()  # 显示进度条
         self.status_label.setText("正在转换...")
         self.result_text.clear()
+        self._set_btn_state(self.copy_btn, False)
+        self._set_btn_state(self.refresh_btn, False)
+        self._set_btn_state(self.clear_btn, False)
+        self._set_btn_state(self.refresh_btn, True)
+        self._set_btn_state(self.clear_btn, True)
 
     def _conversion_complete(self, markdown_content, source):
         self.progress.hide()  # 隐藏进度条
@@ -744,11 +798,24 @@ class MarkItDownUI(QMainWindow):
             # 使用原文件名（不含扩展名）作为标题
             source_path = Path(source)
             self.current_title = source_path.stem  # 文件名不含扩展名
+
+        # 启用复制按钮
+        self._set_btn_state(self.copy_btn, True)
+        self._set_btn_state(self.refresh_btn, True)
+        self._set_btn_state(self.clear_btn, True)
+
+        # 如果之前触发了“自动转换后保存”，转换完成后自动执行保存
+        if self.pending_save:
+            self.pending_save = False
+            self.save_result()
     
     def _conversion_error(self, error_message):
         self.progress.hide()
         self.status_label.setText(f"转换失败: {error_message}")
         QMessageBox.critical(self, "转换错误", error_message)
+        self._set_btn_state(self.copy_btn, False)
+        self._set_btn_state(self.refresh_btn, True)
+        self._set_btn_state(self.clear_btn, True)
         
     def _sanitize_filename(self, filename):
         """清理文件名中的非法字符"""
@@ -764,40 +831,180 @@ class MarkItDownUI(QMainWindow):
         return sanitized
 
     def save_result(self):
+        # 如果还没有结果，先自动转换，再自动保存
         if not self.current_result:
-            QMessageBox.warning(self, "警告", "没有可保存的转换结果")
+            source = self.file_entry.text().strip()
+            if not source:
+                QMessageBox.warning(self, "警告", "请选择文件或输入URL")
+                return
+            self.pending_save = True
+            self.status_label.setText("未转换，正在自动转换后保存...")
+            self.convert_file()
             return
-        
-        # 清理文件名
-        clean_title = self._sanitize_filename(self.current_title)
-        
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            "保存Markdown文件",
-            f"{clean_title}.md",
-            "Markdown文件 (*.md);;文本文件 (*.txt);;所有文件 (*.*)"
-        )
-        
-        if filename:
+        # 如果是 Excel 并且有选中的 Sheet，则批量保存为多个文件
+        if self.current_excel_file and self._get_selected_sheets():
+            selected_sheets = self._get_selected_sheets()
+            if self.use_default_output:
+                folder = self._get_output_dir()
+                folder.mkdir(parents=True, exist_ok=True)
+            else:
+                folder = QFileDialog.getExistingDirectory(self, "选择保存文件夹", str(self._get_output_dir()))
+                if not folder:
+                    return
+
+            base_title = self._sanitize_filename(self.current_title or Path(self.current_excel_file).stem)
+            success, failed = [], []
+
             try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    f.write(self.current_result)
-                self.status_label.setText(f"已保存: {Path(filename).name}")
-                QMessageBox.information(self, "成功", f"文件已保存到: {filename}")
+                workbook = openpyxl.load_workbook(self.current_excel_file, read_only=True)
+                for sheet_name in selected_sheets:
+                    try:
+                        if sheet_name not in workbook.sheetnames:
+                            failed.append((sheet_name, "Sheet 不存在"))
+                            continue
+                        worksheet = workbook[sheet_name]
+                        markdown_content = self._worksheet_to_markdown(worksheet, sheet_name)
+
+                        sheet_suffix = self._sanitize_filename(sheet_name)
+                        file_path = Path(folder) / f"{base_title}_{sheet_suffix}.md"
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            f.write(markdown_content)
+                        success.append(file_path.name)
+                    except Exception as e:
+                        failed.append((sheet_name, str(e)))
+                workbook.close()
             except Exception as e:
-                QMessageBox.critical(self, "保存错误", f"保存文件失败: {str(e)}")
+                QMessageBox.critical(self, "保存错误", f"处理 Excel 时出错: {e}")
+                return
+
+            if success:
+                self.status_label.setText(f"已保存 {len(success)} 个文件到: {folder}")
+                QMessageBox.information(
+                    self,
+                    "保存成功",
+                    f"成功保存 {len(success)} 个文件。\n位置：{folder}"
+                )
+                # 记录最近的保存目录
+                self.last_output_dir = Path(folder)
+                self.output_dir_edit.setText(str(self.last_output_dir))
+            if failed:
+                fail_msg = "\n".join([f"{name}: {err}" for name, err in failed])
+                QMessageBox.warning(self, "部分失败", f"下列 Sheet 保存失败：\n{fail_msg}")
+        else:
+            # 常规单文件保存
+            clean_title = self._sanitize_filename(self.current_title)
+            if self.use_default_output:
+                folder = self._get_output_dir()
+                folder.mkdir(parents=True, exist_ok=True)
+                filename = folder / f"{clean_title}.md"
+            else:
+                filename, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "保存Markdown文件",
+                    str(self._get_output_dir() / f"{clean_title}.md"),
+                    "Markdown文件 (*.md);;文本文件 (*.txt);;所有文件 (*.*)"
+                )
+            
+            if filename:
+                try:
+                    with open(filename, 'w', encoding='utf-8') as f:
+                        f.write(self.current_result)
+                    self.status_label.setText(f"已保存: {Path(filename).name}")
+                    QMessageBox.information(self, "成功", f"文件已保存到: {filename}")
+                    # 记录最近的保存目录
+                    self.last_output_dir = Path(filename).parent
+                    self.output_dir_edit.setText(str(self.last_output_dir))
+                except Exception as e:
+                    QMessageBox.critical(self, "保存错误", f"保存文件失败: {str(e)}")
                 
     def clear_result(self):
         self.result_text.clear()
         self.file_entry.clear()
-        self.status_label.setText("就绪 - 请选择文件或输入URL")
+        self.status_label.setText(f"就绪 - 请选择文件或输入URL（版本 {VERSION}）")
         self.current_result = ""
+        self.pending_save = False
+        # 清空后所有操作按钮置为不可用
+        self._set_btn_state(self.copy_btn, False)
+        self._set_btn_state(self.refresh_btn, False)
+        self._set_btn_state(self.clear_btn, False)
 
         # 隐藏 Excel 选择区域
+        self._reset_excel_state()
+
+    def refresh_file(self):
+        """重新读取当前文件，刷新 Excel Sheet 列表"""
+        source = self.file_entry.text().strip()
+        if not source:
+            QMessageBox.information(self, "提示", "请先选择文件或输入URL")
+            return
+
+        # URL：刷新时仅重置 Excel 状态
+        if source.startswith("http://") or source.startswith("https://"):
+            self._reset_excel_state()
+        else:
+            # 本地文件：重新检查是否为 Excel
+            self._check_excel_file(source)
+
+        self.status_label.setText(f"已刷新: {Path(source).name if not source.startswith('http') else source}")
+
+        # 刷新后清空预览
+        self.result_text.clear()
+        self.current_result = ""
+        self.pending_save = False
+        self._set_btn_state(self.copy_btn, False)
+        self._set_btn_state(self.refresh_btn, True)
+        self._set_btn_state(self.clear_btn, True)
+
+    def copy_result(self):
+        """复制当前 Markdown 结果到剪贴板"""
+        if not self.current_result:
+            return
+        QApplication.clipboard().setText(self.current_result)
+        self.status_label.setText("已复制到剪贴板")
+
+    def _reset_excel_state(self):
+        """统一重置/隐藏 Excel 相关状态"""
         self.excel_container.hide()
         self.current_excel_file = None
         self.excel_sheets = []
         self.selected_sheets = []
+
+    def _get_default_output_dir(self):
+        """获取桌面路径作为默认输出目录，若不存在则退回用户主目录"""
+        desktop = Path.home() / "Desktop"
+        return desktop if desktop.exists() else Path.home()
+
+    def _get_output_dir(self):
+        """从输入框获取输出目录，若为空则使用最近目录"""
+        text = self.output_dir_edit.text().strip()
+        return Path(text) if text else self.last_output_dir
+
+    def toggle_default_output(self, state):
+        self.use_default_output = bool(state)
+        # 根据勾选状态显隐输入框与按钮
+        if self.use_default_output:
+            self.output_dir_edit.setText(str(self.last_output_dir))
+            self.output_dir_edit.show()
+            self.output_dir_browse_btn.show()
+        else:
+            self.output_dir_edit.hide()
+            self.output_dir_browse_btn.hide()
+
+    def _set_btn_state(self, btn: QPushButton, enabled: bool):
+        """统一控制按钮颜色：可用绿色，禁用灰色"""
+        btn.setEnabled(enabled)
+        if enabled:
+            btn.setStyleSheet("background-color: #198754; color: white;")
+        else:
+            btn.setStyleSheet("background-color: #e9ecef; color: #adb5bd;")
+
+    def select_output_dir(self):
+        """选择输出目录并更新最近目录"""
+        current_dir = Path(self.output_dir_edit.text().strip() or self.last_output_dir)
+        folder = QFileDialog.getExistingDirectory(self, "选择输出目录", str(current_dir))
+        if folder:
+            self.last_output_dir = Path(folder)
+            self.output_dir_edit.setText(str(self.last_output_dir))
 
     def _check_excel_file(self, filename):
         """检查是否为 Excel 文件，如果是则显示 sheet 选择"""
@@ -859,6 +1066,46 @@ class MarkItDownUI(QMainWindow):
             if item.isSelected():
                 selected_sheets.append(item.text())
         return selected_sheets
+
+    def _worksheet_to_markdown(self, worksheet, sheet_name):
+        """将 Excel worksheet 转换为 Markdown（供直接保存时复用）"""
+        markdown = f"# {sheet_name}\n\n"
+
+        # 获取有数据的区域
+        if worksheet.max_row == 1 and worksheet.max_column == 1:
+            return markdown + "此 Sheet 为空\n"
+
+        # 转换为表格
+        rows = []
+        for row in worksheet.iter_rows(values_only=True):
+            # 跳过完全空的行
+            if all(cell is None or str(cell).strip() == '' for cell in row):
+                continue
+            # 将 None 值转换为空字符串，其他值转换为字符串
+            row_data = [str(cell) if cell is not None else '' for cell in row]
+            rows.append(row_data)
+
+        if not rows:
+            return markdown + "此 Sheet 为空\n"
+
+        # 确定最大列数
+        max_cols = max(len(row) for row in rows) if rows else 0
+
+        # 补齐所有行到相同列数
+        for row in rows:
+            while len(row) < max_cols:
+                row.append('')
+
+        # 生成 Markdown 表格
+        if rows:
+            header = "| " + " | ".join(rows[0]) + " |"
+            separator = "| " + " | ".join(['---'] * len(rows[0])) + " |"
+            markdown += header + "\n" + separator + "\n"
+
+            for row in rows[1:]:
+                markdown += "| " + " | ".join(row) + " |\n"
+
+        return markdown
 
 
 def main():
